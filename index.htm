@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="ja" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Webcam Viewer</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    /* CSS Variables & Custom Animations */
+    .video-flipped-h { transform: scaleX(-1); }
+    .video-flipped-v { transform: scaleY(-1); }
+    .video-flipped-hv { transform: scale(-1, -1); }
+
+    /* Hide scrollbars during full view */
+    body {
+      user-select: none;
+      -webkit-user-select: none;
+      overflow: hidden;
+    }
+
+    /* Grid overlay patterns */
+    .grid-pattern-rule-of-thirds {
+      background-size: 33.333% 33.333%;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.15) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.15) 1px, transparent 1px);
+    }
+    
+    .grid-pattern-center {
+      background-image: 
+        linear-gradient(to right, transparent calc(50% - 1px), rgba(239, 68, 68, 0.4) 1px, transparent calc(50% + 1px)),
+        linear-gradient(to bottom, transparent calc(50% - 1px), rgba(239, 68, 68, 0.4) 1px, transparent calc(50% + 1px));
+    }
+
+    /* Smooth controls fade */
+    .ui-fade {
+      transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+    }
+    .ui-hidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(10px);
+    }
+  </style>
+</head>
+<body class="h-full w-full flex flex-col justify-between relative bg-black font-sans">
+
+  <!-- Main Video Container -->
+  <main id="video-container" class="relative w-full h-full flex items-center justify-center overflow-hidden bg-slate-950">
+    <!-- Camera Feed -->
+    <video 
+      id="webcam-video" 
+      autoplay 
+      playsinline 
+      class="w-full h-full object-contain transition-all duration-200">
+    </video>
+
+    <!-- Overlay Grid (Optional) -->
+    <div id="grid-overlay" class="absolute inset-0 pointer-events-none hidden transition-opacity duration-300"></div>
+
+    <!-- Status Message Overlay (When Camera Loading or Error) -->
+    <div id="status-overlay" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/90 text-center p-6 z-20">
+      <div id="status-icon" class="mb-4 text-indigo-500 animate-pulse">
+        <i data-lucide="camera" class="w-16 h-16"></i>
+      </div>
+      <h2 id="status-title" class="text-xl font-bold mb-2 text-white">カメラを起動しています...</h2>
+      <p id="status-desc" class="text-slate-400 text-sm max-w-md mb-6">ブラウザのカメラアクセス許可のリクエストが表示されたら「許可」を選択してください。</p>
+      <button id="retry-btn" onclick="initCamera()" class="hidden px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-medium rounded-xl shadow-lg transition flex items-center gap-2">
+        <i data-lucide="refresh-cw" class="w-4 h-4"></i> 再読み込み
+      </button>
+    </div>
+
+    <!-- Flash Effect for Photo Capture -->
+    <div id="flash-effect" class="absolute inset-0 bg-white opacity-0 pointer-events-none transition-opacity duration-150 z-30"></div>
+  </main>
+
+  <!-- Top Bar Controls -->
+  <header id="top-bar" class="ui-fade absolute top-0 left-0 right-0 p-4 flex justify-between items-center bg-gradient-to-b from-black/80 via-black/40 to-transparent z-10">
+    <div class="flex items-center gap-3">
+      <div class="p-2 bg-slate-900/80 backdrop-blur-md rounded-xl border border-slate-700/50 shadow-md">
+        <i data-lucide="video" class="w-5 h-5 text-indigo-400"></i>
+      </div>
+      <div>
+        <h1 class="text-sm font-semibold text-white tracking-wide">Webcam Viewer</h1>
+        <p id="resolution-badge" class="text-[11px] text-slate-400 font-mono">-- x --</p>
+      </div>
+    </div>
+
+    <!-- Camera Selection & Quick Tools -->
+    <div class="flex items-center gap-2">
+      <select id="device-select" class="bg-slate-900/80 hover:bg-slate-800 text-xs text-slate-200 border border-slate-700/60 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500 backdrop-blur-md transition cursor-pointer max-w-[180px] sm:max-w-[240px] truncate">
+        <option value="">カメラを検索中...</option>
+      </select>
+      
+      <button id="grid-toggle" title="グリッドガイド切替" class="p-2.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/60 backdrop-blur-md transition">
+        <i data-lucide="grid" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- Bottom Main Controls Floating Dock -->
+  <footer id="bottom-bar" class="ui-fade absolute bottom-6 left-1/2 -translate-x-1/2 z-10 w-auto">
+    <div class="flex items-center gap-2 sm:gap-3 bg-slate-900/85 border border-slate-700/60 p-2.5 sm:p-3 rounded-2xl shadow-2xl backdrop-blur-xl">
+      
+      <!-- Horizontal Flip -->
+      <button id="flip-h-btn" title="左右反転" class="flex flex-col items-center gap-1 px-3 py-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 active:scale-95 transition">
+        <i data-lucide="flip-horizontal" class="w-5 h-5"></i>
+        <span class="text-[10px] font-medium tracking-tight">左右反転</span>
+      </button>
+
+      <!-- Vertical Flip -->
+      <button id="flip-v-btn" title="天地反転" class="flex flex-col items-center gap-1 px-3 py-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 active:scale-95 transition">
+        <i data-lucide="flip-vertical" class="w-5 h-5"></i>
+        <span class="text-[10px] font-medium tracking-tight">天地反転</span>
+      </button>
+
+      <div class="h-8 w-[1px] bg-slate-700/60 my-auto"></div>
+
+      <!-- Object Fit Mode (Contain / Cover) -->
+      <button id="fit-btn" title="表示モード (全体/画面いっぱい)" class="flex flex-col items-center gap-1 px-3 py-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 active:scale-95 transition">
+        <i id="fit-icon" data-lucide="minimize-2" class="w-5 h-5"></i>
+        <span id="fit-label" class="text-[10px] font-medium tracking-tight">全体表示</span>
+      </button>
+
+      <!-- Snapshot Capture -->
+      <button id="capture-btn" title="静止画保存" class="flex flex-col items-center gap-1 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white active:scale-95 transition shadow-lg shadow-indigo-600/30">
+        <i data-lucide="camera" class="w-5 h-5"></i>
+        <span class="text-[10px] font-medium tracking-tight">撮影</span>
+      </button>
+
+      <div class="h-8 w-[1px] bg-slate-700/60 my-auto"></div>
+
+      <!-- Fullscreen Toggle -->
+      <button id="fullscreen-btn" title="全画面表示" class="flex flex-col items-center gap-1 px-3 py-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 active:scale-95 transition">
+        <i id="fullscreen-icon" data-lucide="maximize" class="w-5 h-5"></i>
+        <span id="fullscreen-label" class="text-[10px] font-medium tracking-tight">全画面</span>
+      </button>
+
+      <!-- Reset Controls -->
+      <button id="reset-btn" title="設定リセット" class="flex flex-col items-center gap-1 px-2.5 py-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 active:scale-95 transition">
+        <i data-lucide="rotate-ccw" class="w-5 h-5"></i>
+        <span class="text-[10px] font-medium tracking-tight">リセット</span>
+      </button>
+    </div>
+  </footer>
+
+  <!-- Notification Toast -->
+  <div id="toast" class="absolute top-20 left-1/2 -translate-x-1/2 bg-slate-900/90 border border-slate-700 text-slate-200 text-xs px-4 py-2 rounded-full shadow-lg pointer-events-none opacity-0 transition-all duration-300 z-30 flex items-center gap-2">
+    <i data-lucide="info" class="w-3.5 h-3.5 text-indigo-400"></i>
+    <span id="toast-message">メッセージ</span>
+  </div>
+
+  <!-- Hidden Canvas for Snapshot Capture -->
+  <canvas id="snapshot-canvas" class="hidden"></canvas>
+
+  <script>
+    // App State Management
+    const state = {
+      flipH: false,
+      flipV: false,
+      fitCover: false,
+      gridMode: 0, // 0: None, 1: Rule of thirds, 2: Center crosshair
+      activeDeviceId: null,
+      stream: null,
+      uiTimeout: null,
+      isMouseOverControls: false
+    };
+
+    // DOM Elements
+    const video = document.getElementById('webcam-video');
+    const container = document.getElementById('video-container');
+    const deviceSelect = document.getElementById('device-select');
+    const statusOverlay = document.getElementById('status-overlay');
+    const statusTitle = document.getElementById('status-title');
+    const statusDesc = document.getElementById('status-desc');
+    const statusIcon = document.getElementById('status-icon');
+    const retryBtn = document.getElementById('retry-btn');
+    const resolutionBadge = document.getElementById('resolution-badge');
+    
+    // UI Controls Elements
+    const topBar = document.getElementById('top-bar');
+    const bottomBar = document.getElementById('bottom-bar');
+    const flipHBtn = document.getElementById('flip-h-btn');
+    const flipVBtn = document.getElementById('flip-v-btn');
+    const fitBtn = document.getElementById('fit-btn');
+    const fitIcon = document.getElementById('fit-icon');
+    const fitLabel = document.getElementById('fit-label');
+    const fullscreenBtn = document.getElementById('fullscreen-btn');
+    const fullscreenIcon = document.getElementById('fullscreen-icon');
+    const fullscreenLabel = document.getElementById('fullscreen-label');
+    const gridToggleBtn = document.getElementById('grid-toggle');
+    const gridOverlay = document.getElementById('grid-overlay');
+    const resetBtn = document.getElementById('reset-btn');
+    const captureBtn = document.getElementById('capture-btn');
+    const flashEffect = document.getElementById('flash-effect');
+    const toast = document.getElementById('toast');
+    const toastMessage = document.getElementById('toast-message');
+
+    // Initialize WebRTC Media Stream
+    async function initCamera(deviceId = null) {
+      showStatus('camera', 'カメラを起動中...', 'ブラウザのアクセス許可を確認しています', true);
+
+      // Stop existing stream tracks
+      if (state.stream) {
+        state.stream.getTracks().forEach(track => track.stop());
+      }
+
+      const constraints = {
+        video: deviceId 
+          ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+          : { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false
+      };
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        state.stream = stream;
+        video.srcObject = stream;
+
+        video.onloadedmetadata = () => {
+          hideStatus();
+          updateResolutionBadge();
+          populateDevices();
+        };
+      } catch (err) {
+        console.error('Camera initialization error:', err);
+        handleCameraError(err);
+      }
+    }
+
+    // Populate Available Video Input Devices
+    async function populateDevices() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(d => d.kind === 'videoinput');
+
+        deviceSelect.innerHTML = '';
+
+        if (videoDevices.length === 0) {
+          const option = document.createElement('option');
+          option.value = '';
+          option.textContent = 'カメラが見つかりません';
+          deviceSelect.appendChild(option);
+          return;
+        }
+
+        // Get currently active track device ID
+        const activeTrack = state.stream?.getVideoTracks()[0];
+        const currentDeviceId = activeTrack?.getSettings()?.deviceId;
+
+        videoDevices.forEach((device, index) => {
+          const option = document.createElement('option');
+          option.value = device.deviceId;
+          option.textContent = device.label || `カメラ ${index + 1}`;
+          if (device.deviceId === currentDeviceId) {
+            option.selected = true;
+            state.activeDeviceId = device.deviceId;
+          }
+          deviceSelect.appendChild(option);
+        });
+      } catch (e) {
+        console.warn('Could not enumerate devices:', e);
+      }
+    }
+
+    // Display Error Messaging
+    function handleCameraError(err) {
+      retryBtn.classList.remove('hidden');
+      if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+        showStatus('shield-alert', 'セキュリティ制限', 'カメラの利用にはHTTPS環境が必要です。https:// でアクセスしてください。');
+      } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        showStatus('video-off', 'カメラのアクセスが拒否されました', 'ブラウザのアドレスバーの鍵アイコンから、カメラの権限を「許可」に変更してください。');
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        showStatus('camera-off', 'カメラが検出されません', 'WebカメラがPCに正常に接続されているか確認してください。');
+      } else {
+        showStatus('alert-triangle', 'カメラの読み込みエラー', `映像を取得できませんでした (${err.message || '不明なエラー'})`);
+      }
+    }
+
+    function showStatus(iconName, title, desc, isAnimated = false) {
+      statusIcon.innerHTML = `<i data-lucide="${iconName}" class="w-16 h-16 ${isAnimated ? 'animate-pulse' : ''}"></i>`;
+      statusTitle.textContent = title;
+      statusDesc.textContent = desc;
+      statusOverlay.classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function hideStatus() {
+      statusOverlay.classList.add('hidden');
+    }
+
+    function updateResolutionBadge() {
+      if (video.videoWidth && video.videoHeight) {
+        resolutionBadge.textContent = `${video.videoWidth} x ${video.videoHeight}`;
+      }
+    }
+
+    // Apply Transform & Flip Logic
+    function updateTransforms() {
+      // Remove class options
+      video.classList.remove('video-flipped-h', 'video-flipped-v', 'video-flipped-hv');
+
+      if (state.flipH && state.flipV) {
+        video.classList.add('video-flipped-hv');
+      } else if (state.flipH) {
+        video.classList.add('video-flipped-h');
+      } else if (state.flipV) {
+        video.classList.add('video-flipped-v');
+      }
+
+      // Update button active states
+      setButtonActive(flipHBtn, state.flipH);
+      setButtonActive(flipVBtn, state.flipV);
+    }
+
+    function setButtonActive(button, isActive) {
+      if (isActive) {
+        button.classList.add('bg-indigo-600/30', 'text-indigo-400', 'border', 'border-indigo-500/50');
+        button.classList.remove('text-slate-300');
+      } else {
+        button.classList.remove('bg-indigo-600/30', 'text-indigo-400', 'border', 'border-indigo-500/50');
+        button.classList.add('text-slate-300');
+      }
+    }
+
+    // Toggle Object-fit (Contain vs Cover)
+    function toggleFitMode() {
+      state.fitCover = !state.fitCover;
+      if (state.fitCover) {
+        video.classList.remove('object-contain');
+        video.classList.add('object-cover');
+        fitIcon.setAttribute('data-lucide', 'maximize-2');
+        fitLabel.textContent = '画面に合せる';
+        showToast('表示モード: 画面いっぱいに拡大');
+      } else {
+        video.classList.remove('object-cover');
+        video.classList.add('object-contain');
+        fitIcon.setAttribute('data-lucide', 'minimize-2');
+        fitLabel.textContent = '全体表示';
+        showToast('表示モード: 全体（比率維持）');
+      }
+      setButtonActive(fitBtn, state.fitCover);
+      lucide.createIcons();
+    }
+
+    // Toggle Grid Overlays
+    function toggleGrid() {
+      state.gridMode = (state.gridMode + 1) % 3;
+      gridOverlay.classList.remove('grid-pattern-rule-of-thirds', 'grid-pattern-center', 'hidden');
+
+      if (state.gridMode === 1) {
+        gridOverlay.classList.add('grid-pattern-rule-of-thirds');
+        setButtonActive(gridToggleBtn, true);
+        showToast('グリッド: 三分割線');
+      } else if (state.gridMode === 2) {
+        gridOverlay.classList.add('grid-pattern-center');
+        setButtonActive(gridToggleBtn, true);
+        showToast('グリッド: センタークロス');
+      } else {
+        gridOverlay.classList.add('hidden');
+        setButtonActive(gridToggleBtn, false);
+        showToast('グリッド: 非表示');
+      }
+    }
+
+    // Fullscreen Handling
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(err => {
+          showToast('全画面表示に失敗しました');
+        });
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        }
+      }
+    }
+
+    function updateFullscreenUI() {
+      const isFS = !!document.fullscreenElement;
+      if (isFS) {
+        fullscreenIcon.setAttribute('data-lucide', 'minimize');
+        fullscreenLabel.textContent = '解除';
+        showToast('全画面モードに入りました');
+      } else {
+        fullscreenIcon.setAttribute('data-lucide', 'maximize');
+        fullscreenLabel.textContent = '全画面';
+      }
+      setButtonActive(fullscreenBtn, isFS);
+      lucide.createIcons();
+    }
+
+    // Auto-hide UI during inactivity
+    function resetUiTimeout() {
+      topBar.classList.remove('ui-hidden');
+      bottomBar.classList.remove('ui-hidden');
+      document.body.style.cursor = 'default';
+
+      clearTimeout(state.uiTimeout);
+
+      if (!state.isMouseOverControls) {
+        state.uiTimeout = setTimeout(() => {
+          topBar.classList.add('ui-hidden');
+          bottomBar.classList.add('ui-hidden');
+          document.body.style.cursor = 'none';
+        }, 3500);
+      }
+    }
+
+    // Capture Snapshot & Download Image
+    function captureSnapshot() {
+      if (!video.videoWidth || !video.videoHeight) return;
+
+      const canvas = document.getElementById('snapshot-canvas');
+      const ctx = canvas.getContext('2d');
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      // Save context state for rotation/flip transformations
+      ctx.save();
+
+      // Apply transformations to match current screen view
+      let scaleX = state.flipH ? -1 : 1;
+      let scaleY = state.flipV ? -1 : 1;
+
+      ctx.translate(
+        scaleX === -1 ? canvas.width : 0,
+        scaleY === -1 ? canvas.height : 0
+      );
+      ctx.scale(scaleX, scaleY);
+
+      // Draw video frame onto canvas
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+
+      // Flash feedback effect
+      flashEffect.classList.remove('opacity-0');
+      flashEffect.classList.add('opacity-90');
+      setTimeout(() => {
+        flashEffect.classList.remove('opacity-90');
+        flashEffect.classList.add('opacity-0');
+      }, 150);
+
+      // Trigger file download
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const fileName = `webcam-snapshot-${timestamp}.png`;
+      
+      const link = document.createElement('a');
+      link.download = fileName;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+
+      showToast('スナップショットをダウンロードしました');
+    }
+
+    // Show Notification Toast Message
+    let toastTimeout;
+    function showToast(message) {
+      toastMessage.textContent = message;
+      toast.classList.remove('opacity-0', 'translate-y-2');
+      toast.classList.add('opacity-100', 'translate-y-0');
+
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
+        toast.classList.remove('opacity-100', 'translate-y-0');
+        toast.classList.add('opacity-0', 'translate-y-2');
+      }, 2500);
+    }
+
+    // Reset All View Transforms
+    function resetAll() {
+      state.flipH = false;
+      state.flipV = false;
+      state.fitCover = false;
+      state.gridMode = 0;
+
+      video.classList.remove('object-cover', 'video-flipped-h', 'video-flipped-v', 'video-flipped-hv');
+      video.classList.add('object-contain');
+
+      gridOverlay.classList.add('hidden');
+      gridOverlay.classList.remove('grid-pattern-rule-of-thirds', 'grid-pattern-center');
+
+      fitIcon.setAttribute('data-lucide', 'minimize-2');
+      fitLabel.textContent = '全体表示';
+
+      setButtonActive(flipHBtn, false);
+      setButtonActive(flipVBtn, false);
+      setButtonActive(fitBtn, false);
+      setButtonActive(gridToggleBtn, false);
+
+      lucide.createIcons();
+      showToast('すべての表示設定をリセットしました');
+    }
+
+    // Event Listeners Setup
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      initCamera();
+
+      // Control Actions
+      flipHBtn.addEventListener('click', () => {
+        state.flipH = !state.flipH;
+        updateTransforms();
+        showToast(`左右反転: ${state.flipH ? 'オン' : 'オフ'}`);
+      });
+
+      flipVBtn.addEventListener('click', () => {
+        state.flipV = !state.flipV;
+        updateTransforms();
+        showToast(`天地反転: ${state.flipV ? 'オン' : 'オフ'}`);
+      });
+
+      fitBtn.addEventListener('click', toggleFitMode);
+      gridToggleBtn.addEventListener('click', toggleGrid);
+      fullscreenBtn.addEventListener('click', toggleFullscreen);
+      captureBtn.addEventListener('click', captureSnapshot);
+      resetBtn.addEventListener('click', resetAll);
+
+      // Device Selection Change
+      deviceSelect.addEventListener('change', (e) => {
+        const deviceId = e.target.value;
+        if (deviceId) {
+          initCamera(deviceId);
+          showToast('カメラを切り替えました');
+        }
+      });
+
+      // Handle Device Changes (e.g. plugin / unplug webcams)
+      navigator.mediaDevices.addEventListener('devicechange', populateDevices);
+
+      // Handle Fullscreen Events
+      document.addEventListener('fullscreenchange', updateFullscreenUI);
+
+      // Handle Keyboard Shortcuts
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'f' || e.key === 'F') toggleFullscreen();
+        if (e.key === 'h' || e.key === 'H') flipHBtn.click();
+        if (e.key === 'v' || e.key === 'V') flipVBtn.click();
+        if (e.key === 'g' || e.key === 'G') gridToggleBtn.click();
+        if (e.key === 's' || e.key === 'S' || e.key === ' ') captureSnapshot();
+        if (e.key === 'r' || e.key === 'R') resetAll();
+        resetUiTimeout();
+      });
+
+      // UI Auto-Hide Mechanics
+      window.addEventListener('mousemove', resetUiTimeout);
+      window.addEventListener('touchstart', resetUiTimeout);
+
+      [topBar, bottomBar].forEach(bar => {
+        bar.addEventListener('mouseenter', () => { state.isMouseOverControls = true; });
+        bar.addEventListener('mouseleave', () => { state.isMouseOverControls = false; resetUiTimeout(); });
+      });
+
+      resetUiTimeout();
+    });
+  </script>
+</body>
+</html>
